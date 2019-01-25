@@ -1,3 +1,4 @@
+import time
 import pyxel
 import dovetail
 
@@ -26,7 +27,7 @@ DIAMONDS = 3
 SUIT_COLORS = [BLACK, BLACK, RED, RED]
 SUIT_FOUR_COLORS = [BLACK, LIGHT_GREEN, RED, LIGHT_BLUE]
 VALUE_STRINGS = ['-', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
-DEALER_DELAY = 30
+DEALER_DELAY = 0.5
 
 INTRO = 0
 BET = 1
@@ -42,6 +43,7 @@ DOWN = pyxel.KEY_DOWN
 LEFT = pyxel.KEY_LEFT
 RIGHT = pyxel.KEY_RIGHT
 ENTER = pyxel.KEY_ENTER
+KP_ENTER = pyxel.KEY_KP_ENTER
 SPACE = pyxel.KEY_SPACE
 ESCAPE = pyxel.KEY_ESCAPE
 Q = pyxel.KEY_Q
@@ -118,6 +120,8 @@ class Hand:
             return ''
         if ace and total < 11:
             return '{}/{}'.format(total, total + 10)
+        if ace and total == 11:
+            return '21!'
         return str(total)
 
     def draw(self, hide_first=False):
@@ -173,7 +177,7 @@ class App:
         if pyxel.btnp(ESCAPE) or pyxel.btnp(Q):
             pyxel.quit()
         if self.state == INTRO:
-            if pyxel.btnp(ENTER) or pyxel.btnp(SPACE):
+            if pyxel.btnp(ENTER) or pyxel.btnp(SPACE) or pyxel.btnp(KP_ENTER):
                 # TODO -- load chips from file
                 self.state = BET
         else:
@@ -195,8 +199,9 @@ class App:
                     self.player.bet += 1
                     if self.player.bet > self.chips:
                         self.player.bet = self.chips
-                if (pyxel.btnp(ENTER) or pyxel.btnp(SPACE)) and 0 < self.player.bet <= self.chips:
+                if (pyxel.btnp(ENTER) or pyxel.btnp(SPACE) or pyxel.btnp(KP_ENTER)) and 0 < self.player.bet <= self.chips:
                     self.chips -= self.player.bet
+                    # TODO -- save chip amount to file
                     self.deal_new_hand()
                     if self.dealer.cards[1].value == 1:
                         self.state == INSURE
@@ -275,19 +280,44 @@ class App:
                     else:
                         self.state = DEALER
             elif self.state == DEALER:
+                time.sleep(DEALER_DELAY)
                 if self.dealer.value() < 17:
                     self.dealer.cards.append(self.shoe.pop())
                     if self.dealer.value() > 21:
                         self.state = PAYOUT
             elif self.state == PAYOUT:
-                pass    # TODO -- payout logic, go on to SPLASH
+                # TODO -- saving chips to file
                 self.state = SPLASH
+                if self.player.blackjack:
+                    if self.dealer.blackjack:
+                        if self.player.insured:
+                            self.chips += 2 * self.player.bet   # insured - even money on blackjack
+                        else:
+                            self.chips += self.player.bet   # push
+                    else:
+                        self.chips += (5 * self.player.bet) // 2    # 3:2 payout + bet back
+                else:
+                    if self.player.value() > 21 and (len(self.split.cards) == 0 or self.split.value() > 21):
+                        pass    # bust
+                    else:
+                        for hand in [self.player, self.split]:
+                            if len(hand.cards) > 0 and hand.value() <= 21:
+                                if self.dealer.value() > 21 or hand.value() > self.dealer.value():
+                                    winnings = 2 * hand.bet  # WIN
+                                    if hand.double:
+                                        winnings *= 2
+                                    self.chips += winnings
+                                elif hand.value() == self.dealer.value():
+                                    push = hand.bet     # PUSH (money back)
+                                    if hand.double:
+                                        push *= 2
+                                    self.chips += push
             elif self.state == SPLASH:
-                pass    # TODO -- keys to go to BET
-        # TODO -- saving chips at appropriate times (BET and PAYOUT, probably)
-        # TESTING
-        if pyxel.btnp(pyxel.KEY_KP_ENTER):
-            self.deal_new_hand()
+                if pyxel.btnp(ENTER) or pyxel.btnp(SPACE) or pyxel.btnp(KP_ENTER):
+                    self.dealer.clear(clear_bet=True)
+                    self.player.clear()
+                    self.split.clear(clear_bet=True)
+                    self.state = BET
 
     def draw(self):
         pyxel.cls(GREEN)
@@ -298,37 +328,21 @@ class App:
             if self.state == BET:
                 self.player.draw()  # for drawing bet amount
                 self.draw_chips()
-            elif self.state == INSURE:
-                self.dealer.draw(hide_first=True)
-                self.player.draw()
-                self.draw_chips()
-                self.draw_insurace()
-            elif self.state == PLAY:
-                self.dealer.draw(hide_first=True)
-                self.player.draw()
-                self.draw_chips()
-                self.split.draw()
-            elif self.state == SPLIT:
-                self.dealer.draw(hide_first=True)
+            else:
+                if self.state in [INSURE, PLAY, SPLIT]:
+                    self.dealer.draw(hide_first=True)
+                else:
+                    self.dealer.draw()
                 self.player.draw()
                 self.draw_chips()
                 self.split.draw()
-            elif self.state == DEALER:
-                self.dealer.draw()
-                self.player.draw()
-                self.draw_chips()
-                self.split.draw()
-            elif self.state == PAYOUT:
-                self.dealer.draw()
-                self.player.draw()
-                self.draw_chips()
-                self.split.draw()
-            elif self.state == SPLASH:
-                self.dealer.draw()
-                self.player.draw()
-                self.draw_chips()
-                self.split.draw()
-                # TODO -- WIN/LOSE gfx
+                if self.state == BET:
+                    pass    # TODO : "BET!" flash text and GOLD instructions (up/down/left/right)
+                if self.state == INSURE:
+                    self.draw_insurance()
+                if self.state == SPLASH:
+                    pyxel.text(10, 10, 'Placeholder W/L text', WHITE)    # TODO -- WIN/LOSE gfx
+                    # TODO -- split W/L gfx if necessary
 
     def draw_intro(self):
         pyxel.text(SCREEN_WIDTH // 2 - 40, SCREEN_HEIGHT // 3, 'Welcome to BLACKJACK!', GOLD)
@@ -340,7 +354,10 @@ class App:
         pyxel.text(SCREEN_WIDTH // 4 + 12, SCREEN_HEIGHT - 8, 'CHIPS: ${}'.format(self.chips), GOLD)
 
     def draw_insurace(self):
-        pass    # TODO -- draw rect w/ border then insurance asking text
+        pyxel.rect(SCREEN_WIDTH // 2 - 32, SCREEN_HEIGHT // 2, SCREEN_WIDTH // 2 + 32, SCREEN_HEIGHT // 2 + 16, GREEN)
+        pyxel.rectb(SCREEN_WIDTH // 2 - 31, SCREEN_HEIGHT // 2 + 1, SCREEN_WIDTH // 2 + 31, SCREEN_HEIGHT // 2 + 14, GOLD)
+        pyxel.text(SCREEN_WIDTH // 2 - 20, SCREEN_HEIGHT // 2 + 3, 'INSURANCE?', GOLD)
+        pyxel.text(SCREEN_WIDTH // 2 - 8, SCREEN_HEIGHT // 2 + 10, 'Y / N', GOLD)
 
 
 App()
